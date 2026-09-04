@@ -3565,10 +3565,6 @@ pub const Surface = extern struct {
         const surface = try alloc.create(CoreSurface);
         errdefer alloc.destroy(surface);
 
-        // Add ourselves to the list of surfaces on the app.
-        try app.core().addSurface(self.rt());
-        errdefer app.core().deleteSurface(self.rt());
-
         // Initialize our surface configuration.
         var config = try apprt.surface.newConfig(
             app.core(),
@@ -3622,6 +3618,20 @@ pub const Surface = extern struct {
 
         // Store it!
         priv.core_surface = surface;
+        errdefer priv.core_surface = null;
+
+        // Add ourselves to the list of surfaces on the app. This must happen
+        // after `priv.core_surface` is set, because everything the app does
+        // with a registered surface (`hasSurface`, `findSurfaceByID`,
+        // `deleteSurface`) resolves it through `apprt.Surface.core()`, which
+        // asserts the surface is initialized. `App.addSurface` documents that
+        // it takes an initialized surface for this reason.
+        //
+        // This is the last fallible step, so it comes before the render
+        // surface is handed a pointer to the core surface below.
+        try app.core().addSurface(self.rt());
+        errdefer app.core().deleteSurface(self.rt());
+
         priv.desktop_notifications = .init(surface.id);
 
         // Give the render surface a pointer to the core surface so it

@@ -126,7 +126,7 @@ pub fn init(
     app_mailbox: App.Mailbox,
 ) !Thread {
     // Create our event loop.
-    var loop = try xev.Loop.init(.{});
+    var loop = try global.xevLoopInit(.{});
     errdefer loop.deinit();
 
     // This async handle is used to "wake up" the renderer and force a render.

@@ -29,6 +29,71 @@ comptime {
 /// backend.
 pub const xev = @import("xev").Dynamic;
 
+/// The smallest io_uring ring size we're willing to run an event loop with.
+/// See `xevLoopInit` for why we may end up asking for a smaller ring than
+/// libxev's default.
+const xev_min_entries: u32 = 16;
+
+/// Initialize an xev event loop, shrinking the loop if the system can't
+/// give us the resources for our preferred size.
+///
+/// The io_uring backend allocates its submission and completion queues when
+/// the loop is created and the kernel charges those pages against the *user's*
+/// `RLIMIT_MEMLOCK` budget, which is cumulative across every process that user
+/// is running. We create two of these loops per surface (renderer and termio)
+/// plus one per active search, so a long-lived Ghostty with many surfaces can
+/// exhaust that budget, at which point `io_uring_setup` starts failing with
+/// `ENOMEM` (`error.SystemResources`) and new surfaces can't be created.
+///
+/// We can't fall back to epoll for a single loop: libxev's dynamic API picks
+/// the backend once (see `xev.detect` below) and dispatches every loop,
+/// completion, and watcher through one global backend value, so mixing
+/// backends in one process isn't supported. What we can do is ask for a
+/// smaller ring, because the memory io_uring locks scales with the entry
+/// count. A smaller submission queue costs us extra `io_uring_enter` calls
+/// under load but is not a correctness problem: the backend queues any
+/// submission that doesn't fit and flushes it on the next submit.
+pub fn xevLoopInit(opts: xev.Options) !xev.Loop {
+    // Only io_uring sizes its loop up front, every other backend ignores
+    // `entries` entirely, so there is nothing for us to retry.
+    if (comptime !xev.dynamic) {
+        return try xev.Loop.init(opts);
+    } else {
+        if (xev.backend != .io_uring) return try xev.Loop.init(opts);
+
+        var reduced = opts;
+        while (true) {
+            if (xev.Loop.init(reduced)) |loop| {
+                if (reduced.entries != opts.entries) std.log.warn(
+                    "io_uring event loop created with a reduced ring " ++
+                        "size entries={} preferred={}",
+                    .{ reduced.entries, opts.entries },
+                );
+
+                return loop;
+            } else |err| switch (err) {
+                // Out of io_uring memory. Try again with a smaller ring.
+                error.SystemResources => {},
+                else => return err,
+            }
+
+            if (reduced.entries <= xev_min_entries) {
+                std.log.err(
+                    "unable to create an io_uring event loop, this user's " ++
+                        "locked memory budget (RLIMIT_MEMLOCK) is likely " ++
+                        "exhausted. Set `async-backend = epoll` in your " ++
+                        "config or raise RLIMIT_MEMLOCK.",
+                    .{},
+                );
+
+                return error.SystemResources;
+            }
+
+            reduced.entries = @max(xev_min_entries, reduced.entries / 4);
+        }
+    }
+}
+
 /// Global process state. This is initialized in main() for exe artifacts and
 /// by ghostty_init() for lib artifacts. Most other methods in this file will
 /// retrieve items stored in this state.

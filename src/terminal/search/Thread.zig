@@ -87,7 +87,7 @@ pub fn init(alloc: Allocator, opts: Options) !Thread {
     errdefer mailbox.destroy(alloc);
 
     // Create our event loop.
-    var loop = try xev.Loop.init(.{});
+    var loop = try global.xevLoopInit(.{});
     errdefer loop.deinit();
 
     // This async handle is used to "wake up" the renderer and force a render.

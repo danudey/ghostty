@@ -3571,7 +3571,10 @@ pub const Surface = extern struct {
             app.rt(),
             &priv.rt_surface,
         ) catch |err| {
-            log.warn("failed to initialize surface err={}", .{err});
+            // This is an error and not a warning: the widget is realized
+            // but has no terminal behind it, so the user is left looking
+            // at a blank surface.
+            log.err("failed to initialize surface err={}", .{err});
             return error.SurfaceError;
         };
         errdefer surface.deinit();

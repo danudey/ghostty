@@ -93,7 +93,7 @@ pub fn init(
     alloc: Allocator,
 ) !Thread {
     // Create our event loop.
-    var loop = try xev.Loop.init(.{});
+    var loop = try global.xevLoopInit(.{});
     errdefer loop.deinit();
 
     // This async handle is used to stop the loop and force the thread to end.
